@@ -51,7 +51,7 @@ export class Erc721SalesService extends BaseService {
     /*
     const tokenContract = new ethers.Contract(config.contract_address, erc721abi, this.provider);
     let filter = tokenContract.filters.Transfer();
-    const startingBlock = 15220657  
+    const startingBlock = 16307964  
     tokenContract.queryFilter(filter, 
       startingBlock, 
       startingBlock+1).then(events => {
