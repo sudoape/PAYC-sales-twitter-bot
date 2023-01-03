@@ -60,6 +60,22 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Running with PM2
+`pm2` is a process manager that can be used to ensure your app will restart after a crash or host machine reboot.  
+This is useful if the bot is running on a service which doesn't handle auto-restarting, like a VM or your own machine.  
+Install it with:  
+```bash
+$ npm install pm2@latest -g
+```
+Then start the bot e.g. in production mode, with:
+```bash
+$ pm2 start npm --name "twitter-bot" -- run start:prod
+```
+
+To set up booting the bot with your system:
+1. Run `pm2 startup`. Then copy the output of this command and run it.
+2. Save the current process list with `pm2 save`.
+
 ## Created by
 
 The phunk community to serve the NFT space.
