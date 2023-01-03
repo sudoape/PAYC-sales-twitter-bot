@@ -51,7 +51,7 @@ export class Erc721SalesService extends BaseService {
     /*
     const tokenContract = new ethers.Contract(config.contract_address, erc721abi, this.provider);
     let filter = tokenContract.filters.Transfer();
-    const startingBlock = 16307964  
+    const startingBlock = 16322846 
     tokenContract.queryFilter(filter, 
       startingBlock, 
       startingBlock+1).then(events => {
@@ -73,7 +73,7 @@ export class Erc721SalesService extends BaseService {
 
   async getTransactionDetails(tx: ethers.Event): Promise<any> {
     // uncomment this to test a specific transaction
-    // if (tx.transactionHash !== '0xcee5c725e2234fd0704e1408cdf7f71d881e67f8bf5d6696a98fdd7c0bcf52f3') return;
+    // if (tx.transactionHash !== '0xdc35f6be648cb1157f28103fdc85bc673b88417b4aa4e7fe7fca6d9754ded717') return;
     
     let tokenId: string;
 
@@ -212,6 +212,17 @@ export class Erc721SalesService extends BaseService {
         }
       }).filter(n => n !== undefined)      
 
+      const BLUR = receipt.logs.map((log: any) => {
+        if (log.topics[0].toLowerCase() === '0x61cbb2a3dee0b6064c2e681aadd61677fb4ef319f0b547508d495626f5a62f64') {
+          const data = log.data.substring(2);
+          const dataSlices = data.match(/.{1,64}/g);
+            console.log("here")
+          // find the right token
+          if (BigInt(`0x${dataSlices[8]}`).toString() !== tokenId) return;
+          return BigInt(`0x${dataSlices[11]}`) / BigInt('1000000000000000');
+        }
+      }).filter(n => n !== undefined)
+
       if (LR.length) {
         const weiValue = (LR[0]?.args?.price)?.toString();
         const value = ethers.utils.formatEther(weiValue);
@@ -226,6 +237,8 @@ export class Erc721SalesService extends BaseService {
         alternateValue = parseFloat(NLL[0].toString())/1000;
       } else if (X2Y2.length) {
         alternateValue = parseFloat(X2Y2[0].toString())/1000;
+      } else if (BLUR.length) {
+        alternateValue = parseFloat(BLUR[0].toString())/1000;
       } else if (OPENSEA_SEAPORT.length) {
         alternateValue = parseFloat(OPENSEA_SEAPORT[0].toString())/1000;
       }
