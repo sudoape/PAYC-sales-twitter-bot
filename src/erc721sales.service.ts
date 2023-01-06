@@ -216,7 +216,6 @@ export class Erc721SalesService extends BaseService {
         if (log.topics[0].toLowerCase() === '0x61cbb2a3dee0b6064c2e681aadd61677fb4ef319f0b547508d495626f5a62f64') {
           const data = log.data.substring(2);
           const dataSlices = data.match(/.{1,64}/g);
-            console.log("here")
           // find the right token
           if (BigInt(`0x${dataSlices[8]}`).toString() !== tokenId) return;
           return BigInt(`0x${dataSlices[11]}`) / BigInt('1000000000000000');
