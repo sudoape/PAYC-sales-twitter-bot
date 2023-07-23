@@ -21,8 +21,8 @@ export const config = {
   // <txHash> =========================== The transaction hash //
   // <from> ===================================== From address //
   // <to> ========================================= To address //
-  saleMessage: '🚨 PAYC #<tokenId> was sold for 💰 <ethPrice> (<fiatPrice>)\n\nfrom: <from>\nto: <to>\n\nhttps://etherscan.io/tx/<txHash>\nhttps://opensea.io/assets/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\nhttps://looksrare.org/collections/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\n',
-  bidMessage: '🚨 PAYC #<tokenId> received a bid for 💰 <ethPrice> (<fiatPrice>)\n\nfrom: <from>\n\nhttps://etherscan.io/tx/<txHash>\nhttps://opensea.io/assets/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\nhttps://looksrare.org/collections/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\n',
+  saleMessage: '🚨 PAYC #<tokenId> was sold for 💰 <ethPrice> (<fiatPrice>)\n\nfrom: <from>\nto: <to>\n\nhttps://etherscan.io/tx/<txHash>\nhttps://blur.io/asset/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\nhttps://looksrare.org/collections/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\n',
+  bidMessage: '🚨 PAYC #<tokenId> received a bid for 💰 <ethPrice> (<fiatPrice>)\n\nfrom: <from>\n\nhttps://etherscan.io/tx/<txHash>\nhttps://blur.io/asset/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\nhttps://looksrare.org/collections/0x176e0Fe17314DEf59F0F06e976E1b74203be4a55/<tokenId>\n',
   // Prefer ENS over 0x address (Uses more Alchemy requests) = //
   // Available Options: ====================================== //
   // true, false ============================================= //
