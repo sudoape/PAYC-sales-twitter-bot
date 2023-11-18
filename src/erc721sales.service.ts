@@ -1,29 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import {
-  TransactionReceipt
-} from "@ethersproject/abstract-provider";
-import { BigNumber, ethers } from 'ethers';
+import { AbiCoder, TransactionReceipt, ethers } from 'ethers';
 import { hexToNumberString } from 'web3-utils';
-import erc721abi from './abi/erc721.json'
+
 import dotenv from 'dotenv';
 dotenv.config();
 
-import looksRareABI from './abi/looksRareABI.json';
-import blurABI from './abi/blur.json';
-import nftxABI from './abi/nftxABI.json';
-import openseaSeaportABI from './abi/seaportABI.json';
-
 import { config } from './config';
-import { BaseService, TweetRequest, TweetType } from './base.service';
+import { BaseService, TweetRequest } from './base.service';
+import { createLogger } from './logging.utils';
 
-const looksRareContractAddress = '0x59728544b08ab483533076417fbbb2fd0b17ce3a'; // Don't change unless deprecated
-const blurContractAddress = '0x000000000000ad05ccc4f10045630fb830b95127';
+const logger = createLogger('erc721sales.service')
 
-const looksInterface = new ethers.utils.Interface(looksRareABI);
-const blurInterface = new ethers.utils.Interface(blurABI);
-const nftxInterface = new ethers.utils.Interface(nftxABI);
-const seaportInterface = new ethers.utils.Interface(openseaSeaportABI);
+const botMevAddress = '0x00000000000A6D473a66abe3DBAab9E1388223Bd'
+
 
 // This can be an array if you want to filter by multiple topics
 // 'Transfer' topic
@@ -35,264 +25,164 @@ export class Erc721SalesService extends BaseService {
   provider = this.getWeb3Provider();
 
   constructor(
-    protected readonly http: HttpService
+    protected readonly http: HttpService,
   ) {
     super(http)
+    if (!global.doNotStartAutomatically) {
+      this.startProvider()
+    }
+  }
+  
+  startProvider() {
+
+    this.initDiscordClient()
+    
     // Listen for Transfer event
     this.provider.on({ address: config.contract_address, topics: [topics] }, (event) => {
-      this.getTransactionDetails(event).then((res) => {
+      this.getTransactionDetails(event, false, true).then((res) => {
         if (!res) return
         // Only tweet transfers with value (Ignore w2w transfers)
-        if (res?.ether || res?.alternateValue) this.tweet(res);
+        if (res?.ether || res?.alternateValue) this.dispatch(res);
         // If free mint is enabled we can tweet 0 value
         else if (config.includeFreeMint) this.tweet(res);
       });
     });
 
     // this code snippet can be useful to test a specific transaction //
-    return
-    const tokenContract = new ethers.Contract(config.contract_address, erc721abi, this.provider);
-    let filter = tokenContract.filters.Transfer();
-    const startingBlock = 17750000
-    tokenContract.queryFilter(filter, 
-      startingBlock, 
-      startingBlock+1).then(events => {
-      for (const event of events) {
-        this.getTransactionDetails(event).then((res) => {
-          if (!res) return
-          console.log(res)
-          return
-          // Only tweet transfers with value (Ignore w2w transfers)
-          if (res?.ether || res?.alternateValue) this.tweet(res);
-          // If free mint is enabled we can tweet 0 value
-          else if (config.includeFreeMint) this.tweet(res);
-          // console.log(res);
-        });     
-      }
-    });
+    // return
+    // const tokenContract = new ethers.Contract(config.contract_address, erc721abi, this.provider);
+    // let filter = tokenContract.filters.Transfer();
+    // const startingBlock = 18594691
+    // tokenContract.queryFilter(filter, 
+    //   startingBlock, 
+    //   startingBlock+1).then(events => {
+    //   for (const event of events) {
+    //     this.getTransactionDetails(event).then((res) => {
+    //       if (!res) return
+    //       console.log(res)
+    //       return
+    //       // Only tweet transfers with value (Ignore w2w transfers)
+    //       if (res?.ether || res?.alternateValue) this.tweet(res);
+    //       // If free mint is enabled we can tweet 0 value
+    //       else if (config.includeFreeMint) this.tweet(res);
+    //       // console.log(res);
+    //     });     
+    //   }
+    // });
   }
 
-  async getTransactionDetails(tx: ethers.Event): Promise<any> {
+  async getTransactionDetails(tx: any, ignoreENS:boolean=false, ignoreContracts:boolean=true): Promise<any> {
     // uncomment this to test a specific transaction
     // if (tx.transactionHash !== '0xdc35f6be648cb1157f28103fdc85bc673b88417b4aa4e7fe7fca6d9754ded717') return;
     
     let tokenId: string;
+    let retryCount: number = 0
 
-    try {
+    while (true) {
+      try {
 
-      // Get addresses of seller / buyer from topics
-      let from = ethers.utils.defaultAbiCoder.decode(['address'], tx?.topics[1])[0];
-      let to = ethers.utils.defaultAbiCoder.decode(['address'], tx?.topics[2])[0];
-      
-      // ignore internal transfers to contract, another transfer event will handle this 
-      // transaction afterward (the one that'll go to the buyer wallet)
-      const code = await this.provider.getCode(to)
-      if (code !== '0x') {
-        console.log(`contract detected for ${tx.transactionHash} event index ${tx.logIndex}`)
-        return
+        // Get addresses of seller / buyer from topics
+        const coder = AbiCoder.defaultAbiCoder()
+        let from = coder.decode(['address'], tx?.topics[1])[0];
+        let to = coder.decode(['address'], tx?.topics[2])[0];
+        
+        // ignore internal transfers to contract, another transfer event will handle this 
+        // transaction afterward (the one that'll go to the buyer wallet)
+        const code = await this.provider.getCode(to)
+        // the ignoreContracts flag make the MEV bots like transaction ignored by the twitter
+        // bot, but not for statistics
+        if (to !== config.nftx_vault_contract_address && code !== '0x' && ignoreContracts) {
+          logger.info(`contract detected for ${tx.transactionHash} event index ${tx.index}`)
+          return
+        }
+        
+        // not an erc721 transfer
+        if (!tx?.topics[3]) return
+
+        // Get tokenId from topics
+        tokenId = hexToNumberString(tx?.topics[3]);
+
+        // Get transaction hash
+        const { transactionHash } = tx;
+        const isMint = BigInt(from) === BigInt(0);
+
+        // Get transaction
+        const transaction = await this.provider.getTransaction(transactionHash);
+        const block = await this.provider.getBlock(transaction.blockNumber)
+        const transactionDate = block.date.toISOString()      
+        logger.info(`handling ${transactionHash} token ${tokenId} log ${tx.index} — ${transactionDate} - from ${tx.blockNumber}`)
+        
+        const { value } = transaction;
+        let ether = ethers.formatEther(value.toString());
+
+        // Get transaction receipt
+        const receipt: TransactionReceipt = await this.provider.getTransactionReceipt(transactionHash);
+
+        // Get token image
+        const imageUrl = config.use_local_images 
+          ? `${config.local_image_path}${tokenId.padStart(4, '0')}.png`
+          : await this.getTokenMetadata(tokenId);
+
+        // If ens is configured, get ens addresses
+        let ensTo: string;
+        let ensFrom: string;
+        if (config.ens && !ignoreENS) {
+          ensTo = await this.provider.lookupAddress(`${to}`);
+          ensFrom = await this.provider.lookupAddress(`${from}`);
+        }
+
+        // Set the values for address to & from -- Shorten non ens
+        const initialFrom = from
+        const initialTo = to
+        to = config.ens && !ignoreENS ? (ensTo ? ensTo : this.shortenAddress(to)) : this.shortenAddress(to);
+        from = (isMint && config.includeFreeMint) ? 'Mint' : config.ens ? (ensFrom ? ensFrom : this.shortenAddress(from)) : this.shortenAddress(from);
+        
+        // Create response object
+        const tweetRequest: TweetRequest = {
+          logIndex: tx.index,
+          eventType: isMint ? 'mint' : 'sale',
+          initialFrom,
+          initialTo,
+          from,
+          to,
+          tokenId,
+          ether: parseFloat(ether),
+          transactionHash,
+          transactionDate,
+          alternateValue: 0,
+          platform: 'unknown',
+        };
+
+        // If the image was successfully obtained
+        if (imageUrl) tweetRequest.imageUrl = imageUrl;
+       
+        // Try to use custom parsers
+        for (let parser of config.parsers) {
+          const result = parser.parseLogs(transaction, receipt.logs, tokenId)
+          if (result) {
+            tweetRequest.alternateValue = result
+            tweetRequest.platform = parser.platform
+            break
+          }
+        }
+        
+        if (transaction.to === '0x941A6d105802CCCaa06DE58a13a6F49ebDCD481C' && !tweetRequest.alternateValue) {
+          // nftx swap of "inner token" that weren't bought in the same transaction ignore this
+          logger.info(`nftx swap detected without ETH buy, ignoring ${tx.transactionHash} event index ${tx.index}`)
+          return
+        }
+        return tweetRequest
+
+      } catch (err) {
+        logger.info(`${tokenId} failed to send, retryCount: ${retryCount}`, err);
+        retryCount++
+        if (retryCount >= 10) {
+          logger.info("retried 10 times, giving up")
+          return null;
+        }
+        logger.info(`will retry after a delay ${retryCount}...`)
+        await new Promise( resolve => setTimeout(resolve, 500*retryCount) )
       }
-
-      // not an erc721 transfer
-      if (!tx?.topics[3]) return
-
-      // Get tokenId from topics
-      tokenId = hexToNumberString(tx?.topics[3]);
-
-      // Get transaction hash
-      const { transactionHash } = tx;
-      console.log(`handling ${transactionHash}`)
-      const isMint = BigNumber.from(from).isZero();
-
-      // Get transaction
-      const transaction = await this.provider.getTransaction(transactionHash);
-      const { value } = transaction;
-      const ether = ethers.utils.formatEther(value.toString());
-
-      // Get transaction receipt
-      const receipt: TransactionReceipt = await this.provider.getTransactionReceipt(transactionHash);
-
-      // Get token image
-      const imageUrl = config.use_local_images 
-        ? `${config.local_image_path}${tokenId.padStart(4, '0')}.png`
-        : await this.getTokenMetadata(tokenId);
-
-      // Check if LooksRare & parse the event & get the value
-      let alternateValue = 0;
-      const LR = receipt.logs.map((log: any) => {
-        if (log.address.toLowerCase() === looksRareContractAddress.toLowerCase()) {  
-          return looksInterface.parseLog(log);
-        }
-      }).filter((log: any) => (log?.name === 'TakerAsk' || log?.name === 'TakerBid') &&
-        log?.args.tokenId == tokenId);
-      
-      const NFTX = receipt.logs.map((log: any) => {
-        // direct buy from vault
-        if (log.topics[0].toLowerCase() === '0x1cdb5ee3c47e1a706ac452b89698e5e3f2ff4f835ca72dde8936d0f4fcf37d81') {  
-          const relevantData = log.data.substring(2);
-          const relevantDataSlice = relevantData.match(/.{1,64}/g);
-          return BigInt(`0x${relevantDataSlice[1]}`) / BigInt('1000000000000000');
-        } else if (log.topics[0].toLowerCase() === '0x63b13f6307f284441e029836b0c22eb91eb62a7ad555670061157930ce884f4e') {
-          const parsedLog = nftxInterface.parseLog(log)
-          
-          // check that the current transfer is NFTX related
-          if (!parsedLog.args.nftIds.filter(n => BigInt(n).toString() === tokenId).length) {
-            return
-          }
-          
-          // redeem, find corresponding token bought
-          const buys = receipt.logs.filter((log2: any) => log2.topics[0].toLowerCase() === '0xf7735c8cb2a65788ca663fc8415b7c6a66cd6847d58346d8334e8d52a599d3df')
-            .map(b => {
-              const relevantData = b.data.substring(2);
-              const relevantDataSlice = relevantData.match(/.{1,64}/g);
-              return BigInt(`0x${relevantDataSlice[1]}`)
-            })
-          if (buys.length) {
-            const spent = buys.reduce((previous, current) => previous + current, BigInt(0)) / BigInt('100000000000000000')
-            return spent
-          } else {
-            // we're still missing the funds, check swap of weth
-            const swaps = receipt.logs.filter((log2: any) => log2.topics[0].toLowerCase() === '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822')
-              .map(b => {
-                const relevantData = b.data.substring(2);
-                const relevantDataSlice = relevantData.match(/.{1,64}/g);
-                const moneyIn = BigInt(`0x${relevantDataSlice[1]}`)
-                if (moneyIn > BigInt(0))
-                  return moneyIn / BigInt('1000000000000000');
-              })
-            if (swaps.length) return swaps.reduce((previous, current) => previous + current, BigInt(0))
-          }
-        }
-      }).filter(n => n !== undefined)
-
-      // Check all marketplaces specific events to find an alternate price
-      // in case of sweep, multiple buy, or bid
-
-      const NLL = receipt.logs.map((log: any) => {
-        if (log.topics[0].toLowerCase() === '0x975c7be5322a86cddffed1e3e0e55471a764ac2764d25176ceb8e17feef9392c') {
-          const relevantData = log.data.substring(2);
-          if (tokenId !== parseInt(log.topics[1], 16).toString()) {
-            return
-          }
-          return BigInt(`0x${relevantData}`) / BigInt('1000000000000000')
-        }
-      }).filter(n => n !== undefined)
-
-      const X2Y2 = receipt.logs.map((log: any, index:number) => {
-        if (log.topics[0].toLowerCase() === '0x3cbb63f144840e5b1b0a38a7c19211d2e89de4d7c5faf8b2d3c1776c302d1d33') {
-          const data = log.data.substring(2);
-          const dataSlices = data.match(/.{1,64}/g);
-          // find the right token
-          if (BigInt(`0x${dataSlices[18]}`).toString() !== tokenId) return;
-          let amount = BigInt(`0x${dataSlices[12]}`) / BigInt('1000000000000000');
-          if (amount === BigInt(0)) {
-            amount = BigInt(`0x${dataSlices[26]}`) / BigInt('1000000000000000');
-          }
-          return amount
-        }
-      }).filter(n => n !== undefined)  
-
-      const BLUR_IO = receipt.logs.map((log: any) => {
-        if (log.address.toLowerCase() === blurContractAddress.toLowerCase()) {  
-          return blurInterface.parseLog(log);
-        }
-      }).filter(l => l?.name === 'OrdersMatched' && l?.args.buy.tokenId.toString() === tokenId)
-      
-      const OPENSEA_SEAPORT = receipt.logs.map((log: any) => {
-        if (log.topics[0].toLowerCase() === '0x9d9af8e38d66c62e2c12f0225249fd9d721c54b83f48d9352c97c6cacdcb6f31') {
-          const logDescription = seaportInterface.parseLog(log);
-          const matchingOffers = logDescription.args.offer.filter(
-            o => o.identifier.toString() === tokenId || 
-            o.identifier.toString() === '0');
-          const tokenCount = logDescription.args.offer.length;
-          if (matchingOffers.length === 0) {
-            return
-          }
-          let amounts = logDescription.args.consideration.map(c => BigInt(c.amount))
-          // add weth
-          const wethOffers = matchingOffers.map(o => o.token === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' && o.amount > 0 ? BigInt(o.amount) : BigInt(0));
-          if (wethOffers.length > 0 && wethOffers[0] != BigInt(0)) {
-            console.log('found weth offer, using it as amount')
-            amounts = wethOffers
-          }
-          console.log(amounts)
-          const amount = amounts.reduce((previous,current) => previous + current, BigInt(0))
-          return amount / BigInt('1000000000000000') / BigInt(tokenCount)
-        }
-      }).filter(n => n !== undefined)      
-
-      const BLUR = receipt.logs.map((log: any) => {
-        if (log.topics[0].toLowerCase() === '0x61cbb2a3dee0b6064c2e681aadd61677fb4ef319f0b547508d495626f5a62f64') {
-          const data = log.data.substring(2);
-          const dataSlices = data.match(/.{1,64}/g);
-          // find the right token
-          if (BigInt(`0x${dataSlices[8]}`).toString() !== tokenId) return;
-          return BigInt(`0x${dataSlices[11]}`) / BigInt('1000000000000000');
-        }
-      }).filter(n => n !== undefined)
-
-      if (LR.length) {
-        const weiValue = (LR[0]?.args?.price)?.toString();
-        const value = ethers.utils.formatEther(weiValue);
-        alternateValue = parseFloat(value);
-      } else if (NFTX.length) {
-        // find the number of token transferred to adjust amount per token
-        const redeemLog = receipt.logs.filter((log: any) => log.topics[0].toLowerCase() === '0x63b13f6307f284441e029836b0c22eb91eb62a7ad555670061157930ce884f4e')[0]
-        const parsedLog = nftxInterface.parseLog(redeemLog)
-        const tokenCount = Math.max(parsedLog.args.nftIds.length, 1)
-        alternateValue = parseFloat(NFTX[0].toString())/tokenCount/1000;
-      } else if (NLL.length) {
-        alternateValue = parseFloat(NLL[0].toString())/1000;
-      } else if (X2Y2.length) {
-        alternateValue = parseFloat(X2Y2[0].toString())/1000;
-      } else if (BLUR.length) {
-        alternateValue = parseFloat(BLUR[0].toString())/1000;
-      } else if (OPENSEA_SEAPORT.length) {
-        alternateValue = parseFloat(OPENSEA_SEAPORT[0].toString())/1000;
-      } else if (BLUR_IO.length) {
-        const weiValue = (BLUR_IO[0]?.args?.buy.price)?.toString();
-        const value = ethers.utils.formatEther(weiValue);
-        alternateValue = parseFloat(value);
-      }
-
-
-      // if there is an NFTX swap involved, ignore this transfer
-      const swaps = receipt.logs.filter((log2: any) => log2.topics[0].toLowerCase() === '0x7af2bc3f8ec800c569b6555feaf16589d96a9d04a49d1645fd456d75fa0b372b')
-      if (swaps.length) {
-        console.log('nftx swap involved in this transaction, ignoring it')
-        return
-      }
-
-      // If ens is configured, get ens addresses
-      let ensTo: string;
-      let ensFrom: string;
-      if (config.ens) {
-        ensTo = await this.provider.lookupAddress(`${to}`);
-        ensFrom = await this.provider.lookupAddress(`${from}`);
-      }
-
-      // Set the values for address to & from -- Shorten non ens
-      to = config.ens ? (ensTo ? ensTo : this.shortenAddress(to)) : this.shortenAddress(to);
-      from = (isMint && config.includeFreeMint) ? 'Mint' : config.ens ? (ensFrom ? ensFrom : this.shortenAddress(from)) : this.shortenAddress(from);
-
-      // Create response object
-      const tweetRequest: TweetRequest = {
-        from,
-        to,
-        tokenId,
-        ether: parseFloat(ether),
-        transactionHash,
-        alternateValue,
-        type: TweetType.SALE
-      };
-
-      // If the image was successfully obtained
-      if (imageUrl) tweetRequest.imageUrl = imageUrl;
-
-      return tweetRequest;
-
-    } catch (err) {
-      console.log(`${tokenId} failed to send`, err);
-      return null;
     }
   }
 
