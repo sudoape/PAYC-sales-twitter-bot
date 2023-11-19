@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import fs from 'fs';
 import fiatSymbols from './fiat-symobols.json';
-import { ethers } from 'ethers';
+import { ethers, AlchemyProvider } from 'ethers';
 import { catchError, firstValueFrom, map, Observable, of, switchMap, timer } from 'rxjs';
 import currency from 'currency.js';
 
@@ -18,10 +18,10 @@ import { HexColorString, MessageAttachment, MessageEmbed } from 'discord.js';
 
 export const alchemyAPIUrl = 'https://eth-mainnet.alchemyapi.io/v2/';
 export const alchemyAPIKey = process.env.ALCHEMY_API_KEY;
-//const provider = ethers.getDefaultProvider(alchemyAPIUrl + alchemyAPIKey);
-const provider = global.providerForceHTTPS ? 
-  ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT_HTTP) :
-  ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT);
+const provider = new AlchemyProvider(null, alchemyAPIKey);
+// const provider = global.providerForceHTTPS ? 
+//   ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT_HTTP) :
+//   ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT);
 
 const logger = createLogger('base.service')
 

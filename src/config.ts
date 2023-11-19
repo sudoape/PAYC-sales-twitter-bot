@@ -19,10 +19,10 @@ export const config = {
   // Enter the block where your contract has been created
   statistic_initial_block: 13896439,
   //
-  // discord_channels: '919681244537716767,968448656221011981',
-  // discord_client_id: '1139547496033558561',
-  // discord_guild_ids: '880485569652740136,968448656221011978',
-  // discord_empty_wallet_gifs: ['https://media.tenor.com/J3mNIbj6A4wAAAAd/empty-shelves-john-travolta.gif', 'https://media.tenor.com/NteLNqDJB2QAAAAd/out-of-stock-this-is-happening.gif'],
+  discord_channels: '', //'919681244537716767,968448656221011981',
+  discord_client_id: '', //'1139547496033558561',
+  discord_guild_ids: '', //'880485569652740136,968448656221011978',
+  discord_empty_wallet_gifs: ['https://media.tenor.com/J3mNIbj6A4wAAAAd/empty-shelves-john-travolta.gif', 'https://media.tenor.com/NteLNqDJB2QAAAAd/out-of-stock-this-is-happening.gif'],
   //
   // uncomment the 2 lines above to use local images instead of retrieving images from ipfs for each tweet
   use_local_images: false,
@@ -30,10 +30,10 @@ export const config = {
   // 
   // this is a configuration for the phunk bid demo extension
   local_bids_image_path: './bids_images/Phunk_',
-  // discord_owned_tokens_image_path: 'http://70.34.216.182/token_images/phunk<tokenId>.png',
-  // discord_footer_text: 'FLIP!',
+  discord_owned_tokens_image_path: '', //'http://70.34.216.182/token_images/phunk<tokenId>.png',
+  discord_footer_text: 'FLIP!',
   // this is a configuration for the phunk auction house demo extension
-  // local_auction_image_path: './auction_images/phunk',
+  local_auction_image_path: '', //'./auction_images/phunk',
   //
   // Fiat Conversion Currency ================================ //
   // Available Options: ====================================== //
