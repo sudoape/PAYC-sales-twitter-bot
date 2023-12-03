@@ -14,7 +14,8 @@ import { PhunksErc721SpecialisedSalesService } from './extensions/phunks.erc721.
   imports: [HttpModule],
   controllers: [],
   providers: [
-    PhunksErc721SpecialisedSalesService, 
+    Erc721SalesService,
+    // PhunksErc721SpecialisedSalesService, 
     ////
     // Below is a simple example of how to create and plug a custom 
     // extension to the bot

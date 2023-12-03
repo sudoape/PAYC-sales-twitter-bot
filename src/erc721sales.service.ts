@@ -9,6 +9,7 @@ dotenv.config();
 import { config } from './config';
 import { BaseService, TweetRequest } from './base.service';
 import { createLogger } from './logging.utils';
+// import erc721abi from './abi/erc721.json'
 
 const logger = createLogger('erc721sales.service')
 
@@ -52,7 +53,7 @@ export class Erc721SalesService extends BaseService {
     // return
     // const tokenContract = new ethers.Contract(config.contract_address, erc721abi, this.provider);
     // let filter = tokenContract.filters.Transfer();
-    // const startingBlock = 18594691
+    // const startingBlock = 18658418
     // tokenContract.queryFilter(filter, 
     //   startingBlock, 
     //   startingBlock+1).then(events => {
@@ -60,12 +61,10 @@ export class Erc721SalesService extends BaseService {
     //     this.getTransactionDetails(event).then((res) => {
     //       if (!res) return
     //       console.log(res)
-    //       return
     //       // Only tweet transfers with value (Ignore w2w transfers)
     //       if (res?.ether || res?.alternateValue) this.tweet(res);
     //       // If free mint is enabled we can tweet 0 value
     //       else if (config.includeFreeMint) this.tweet(res);
-    //       // console.log(res);
     //     });     
     //   }
     // });
