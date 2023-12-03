@@ -1,52 +1,64 @@
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import fs from 'fs';
-import twit from 'twit';
-
-import { ethers } from 'ethers';
-
+import fiatSymbols from './fiat-symobols.json';
+import { ethers, AlchemyProvider } from 'ethers';
 import { catchError, firstValueFrom, map, Observable, of, switchMap, timer } from 'rxjs';
-
 import currency from 'currency.js';
 
 import dotenv from 'dotenv';
 dotenv.config();
 
-import looksRareABI from './abi/looksRareABI.json';
-
 import { config } from './config';
-import fiatSymbols from './fiat-symobols.json';
+import TwitterClient from './clients/twitter';
+import { EUploadMimeType } from 'twitter-api-v2';
+import DiscordClient from './clients/discord';
+import { createLogger } from './logging.utils';
+import { HexColorString, MessageAttachment, MessageEmbed } from 'discord.js';
 
 export const alchemyAPIUrl = 'https://eth-mainnet.alchemyapi.io/v2/';
 export const alchemyAPIKey = process.env.ALCHEMY_API_KEY;
+const provider = new AlchemyProvider(null, alchemyAPIKey);
+// const provider = global.providerForceHTTPS ? 
+//   ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT_HTTP) :
+//   ethers.getDefaultProvider(process.env.GETH_NODE_ENDPOINT);
 
-const tokenContractAddress = config.contract_address;
+const logger = createLogger('base.service')
 
-const provider = new ethers.providers.JsonRpcProvider(alchemyAPIUrl + alchemyAPIKey);
+if (!global.noWatchdog) {
+  startWatchdog()
+}
 
-const twitterConfig = {
-  consumer_key: process.env.TW_CONSUMER_KEY,
-  consumer_secret: process.env.TW_CONSUMER_SECRET,
-  access_token: process.env.TW_ACCESS_TOKEN_KEY,
-  access_token_secret: process.env.TW_ACCESS_TOKEN_SECRET,
-};
-
-const twitterClient = new twit(twitterConfig);
-
-export enum TweetType {
-  SALE,
-  BID_ENTERED
+function startWatchdog() {
+  return setTimeout(async () => {
+    const timeoutInterval = setTimeout(() => {
+      logger.warn(`Websocket connection hanged! Killing myself.`)
+      process.exit(1)
+    }, 10000);
+    logger.info(`Checking websocket connection...`)
+    const block = await provider.getBlockNumber()
+    logger.info(`Websocket connection alive: ${block} !`)
+    clearInterval(timeoutInterval)
+    startWatchdog()
+  }, 30000)  
 }
 
 export interface TweetRequest {
+  platform: string,
+  logIndex: number,
+  eventType: string,
+  initialFrom:string, 
+  initialTo?:string, 
   from: any;
   to?: any;
   tokenId: string;
   ether: number;
   transactionHash: string;
+  transactionDate: string;
   alternateValue: number;
   imageUrl?: string;
-  type:TweetType;
+  additionalText?: string;
+
 }
 
 @Injectable()
@@ -54,11 +66,24 @@ export class BaseService {
   
   fiatValues: any;
 
+  twitterClient: TwitterClient;
+  discordClient: DiscordClient;
+
   constructor(
     protected readonly http: HttpService
   ) {
 
-    this.getEthToFiat().subscribe((fiat) => this.fiatValues = fiat.ethereum);
+    this.getEthToFiat().subscribe((fiat) => {
+      if (fiat && fiat.ethereum && Object.values(fiat.ethereum).length)
+        this.fiatValues = fiat.ethereum
+    });
+    this.twitterClient = new TwitterClient()
+    this.discordClient = new DiscordClient()
+
+  }
+
+  initDiscordClient() {
+    this.discordClient.init()
   }
 
   getWeb3Provider() {
@@ -76,7 +101,7 @@ export class BaseService {
     return await firstValueFrom(
       this.http.get(url, {
         params: {
-          contractAddress: tokenContractAddress,
+          contractAddress: config.contract_address,
           tokenId,
           tokenType: 'erc721'
         }
@@ -91,63 +116,126 @@ export class BaseService {
     );
   }
 
-  async tweet(data: TweetRequest) {
+  async dispatch(data: TweetRequest) {
+    const tweet = await this.tweet(data)
+    await this.discord(data, tweet.id)
+  }
+  
+  async discord(data: TweetRequest, 
+                tweetId:string|undefined=undefined, 
+                template:string=config.saleMessageDiscord, 
+                color:string='#0084CA',
+                footerTextParam:string|undefined=undefined) {
+    if (!this.discordClient.setup) return
+    if (tweetId) template = template.replace(new RegExp('<tweetLink>', 'g'), `<https://twitter.com/i/web/status/${tweetId}>`);
+    const image = config.use_local_images ? data.imageUrl : this.transformImage(data.imageUrl);
+    
+    const platformImage = data.platform === 'nftx' ? 'NFTX.png' :
+      data.platform === 'opensea' ? 'OPENSEA.png' :
+      data.platform === 'looksrare' ? 'LOOKSRARE.png' :
+      data.platform === 'x2y2' ? 'X2Y2.png' :
+      data.platform === 'rarible' ? 'RARIBLE.png' :
+      data.platform === 'notlarvalabs' ? 'NLL.png' :
+      data.platform === 'phunkauction' ? 'AUCTION.png' :
+      data.platform === 'phunkflywheel' ? 'FLYWHEEL.png' :
+      data.platform === 'blurio' ? 'BLUR.png' :
+      'ETHERSCAN.png';
+    const sentText = this.formatText(data, template)
+    const footerText = footerTextParam ?? config.discord_footer_text
+    const embed = new MessageEmbed()
+      .setColor(color as HexColorString)
+      .setImage(`attachment://token.png`)
+      .setDescription(sentText)
+      .setTimestamp()
+      .setFooter({ text: footerText, iconURL: 'attachment://platform.png' });
+  
+    let processedImage: Buffer | undefined;
+    if (image) processedImage = await this.getImageFile(image);
+    processedImage = await this.decorateImage(processedImage, data)
+    await this.discordClient.sendEmbed(embed, processedImage, `platform_images/${platformImage}`);
+  }
 
-    let tweetText: string = data.type === TweetType.SALE ? config.saleMessage : config.bidMessage;
+  async tweet(data: TweetRequest, template:string=config.saleMessage) {
+
+    const tweetText = this.formatText(data, template)
+    
+    // Format our image to base64
+    const image = config.use_local_images ? data.imageUrl : this.transformImage(data.imageUrl);
+
+    let processedImage: Buffer | undefined;
+    if (image) processedImage = await this.getImageFile(image);
+
+    processedImage = await this.decorateImage(processedImage, data)
+
+    let media_id: string;
+    if (processedImage) {
+      // Upload the item's image to Twitter & retrieve a reference to it
+      media_id = await this.twitterClient.uploadMedia(processedImage, {
+        mimeType: EUploadMimeType.Png,
+      });
+    }
+
+    // Post the tweet 👇
+    // If you need access to this endpoint, you’ll need to apply for Elevated access via the Developer Portal. You can learn more here: https://developer.twitter.com/en/docs/twitter-api/getting-started/about-twitter-api#v2-access-leve
+    const { data: createdTweet, errors: errors } = await this.twitterClient.tweet(
+      tweetText,
+      { media: { media_ids: [media_id] } },
+    );
+    if (!errors) {
+      logger.info(
+        `Successfully tweeted: ${createdTweet.id} -> ${createdTweet.text}`,
+      );
+      return createdTweet;
+    } else {
+      logger.error(errors);
+      return null;
+    }
+  }
+  
+  async decorateImage(processedImage: Buffer, data:TweetRequest): Promise<Buffer> {
+    // Do nothing but can be overriden by subclasses
+    return processedImage
+  }
+
+  formatText(data: TweetRequest, template:string) {
 
     // Cash value
-    const fiatValue = this.fiatValues[config.currency] * (data.alternateValue ? data.alternateValue : data.ether);
-    const fiat = currency(fiatValue, { symbol: fiatSymbols[config.currency].symbol, precision: 0 });
+    const value = data.alternateValue && data.alternateValue > 0 ? data.alternateValue : data.ether
+    const fiatValue = this.fiatValues && Object.values(this.fiatValues).length ? this.fiatValues[config.currency] * value : undefined;
+    const fiat = fiatValue != null ? currency(fiatValue, { symbol: fiatSymbols[config.currency].symbol, precision: 0 }) : undefined;
 
     const ethValue = data.alternateValue ? data.alternateValue : data.ether;
     const eth = currency(ethValue, { symbol: 'Ξ', precision: 3 });
 
     // Replace tokens from config file
-    tweetText = tweetText.replace(new RegExp('<tokenId>', 'g'), data.tokenId);
-    tweetText = tweetText.replace(new RegExp('<ethPrice>', 'g'), eth.format());
-    tweetText = tweetText.replace(new RegExp('<txHash>', 'g'), data.transactionHash);
-    tweetText = tweetText.replace(new RegExp('<from>', 'g'), data.from);
-    tweetText = tweetText.replace(new RegExp('<to>', 'g'), data.to);
-    tweetText = tweetText.replace(new RegExp('<fiatPrice>', 'g'), fiat.format());
+    template = template.replace(new RegExp('<tokenId>', 'g'), data.tokenId);
+    template = template.replace(new RegExp('<ethPrice>', 'g'), eth.format());
+    template = template.replace(new RegExp('<txHash>', 'g'), data.transactionHash);
+    template = template.replace(new RegExp('<from>', 'g'), data.from);
+    template = template.replace(new RegExp('<initialFrom>', 'g'), data.initialFrom);
+    template = template.replace(new RegExp('<to>', 'g'), data.to);
+    template = template.replace(new RegExp('<initialTo>', 'g'), data.initialTo);
+    template = template.replace(new RegExp('<fiatPrice>', 'g'), fiat ? fiat.format() : '???');
+    template = template.replace(new RegExp('<additionalText>', 'g'), data.additionalText);
 
-    // Format our image to base64
-    const image = config.use_local_images ? data.imageUrl : this.transformImage(data.imageUrl);
-
-    let processedImage: string;
-    if (image) processedImage = await this.getBase64(image);
-
-    let media_ids: Array<string>;
-    if (processedImage) {
-      // Upload the item's image to Twitter & retrieve a reference to it
-      media_ids = await new Promise((resolve) => {
-        twitterClient.post('media/upload', { media_data: processedImage }, (error, media: any) => {
-          resolve(error ? null : [media.media_id_string]);
-        });
-      });
-    }
-
-    let tweet: any = { status: tweetText };
-    if (media_ids) tweet.media_ids = media_ids;
-
-    // Post the tweet 👇
-    // If you need access to this endpoint, you’ll need to apply for Elevated access via the Developer Portal. You can learn more here: https://developer.twitter.com/en/docs/twitter-api/getting-started/about-twitter-api#v2-access-leve
-    twitterClient.post('statuses/update', tweet, (error) => {
-      if (!error) console.log(`Successfully tweeted: ${tweetText}`);
-      else console.error(error);
-    });
+    return template
   }
-
-  async getBase64(url: string) {
-    if (url.startsWith('http')) {
-      return await firstValueFrom(
-        this.http.get(url, { responseType: 'arraybuffer' }).pipe(
-          map((res) => Buffer.from(res.data, 'binary').toString('base64')),
-          catchError(() => of(null))
-        )
-      );
-    } else {
-      return fs.readFileSync(url, {encoding: 'base64'});
-    }
+  
+  async getImageFile(url: string): Promise<Buffer | undefined> {
+    return new Promise((resolve, _) => {
+      if (url.startsWith('http')) {
+        this.http.get(url, { responseType: 'arraybuffer' }).subscribe((res) => {
+          if (res.data) {
+            const file = Buffer.from(res.data, 'binary');
+            resolve(file);
+          } else {
+            resolve(undefined);
+          }
+        });
+      } else {
+        resolve(fs.readFileSync(url));
+      }
+    });
   }
   
   getEthToFiat(): Observable<any> {
@@ -161,8 +249,8 @@ export class BaseService {
       map((res: any) => res.data),
       // tap((res) => console.log(res)),
       catchError((err: any) => {
-        console.log(err);
-        return of({});
+        logger.warn('coin gecko call failed, ignoring fiat price', err.toString());
+        return of(undefined);
       })
     );
   }
@@ -181,3 +269,4 @@ export class BaseService {
   }
 
 }
+

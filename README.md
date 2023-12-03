@@ -1,5 +1,7 @@
 <h1>Twitter NFT sales bot</h1>
 
+[![coverage](https://crypto-phunks.github.io/nft-sales-twitter-bot/badge-lines.svg?update2)](https://crypto-phunks.github.io/nft-sales-twitter-bot/)
+ 
 ## Description
 
 Tweets real-time NFT sales for ERC721 Smart contracts
@@ -46,6 +48,46 @@ class, an example is provided in  the `extensions/phunks.bid.extension.service.t
   ],
 })
 ```
+
+## Discord support
+
+Just add a `DISCORD_TOKEN` in your `.env` file, also add `saleMessageDiscord` and `discord_channel` keys. The later must contain the identifier of the channel you want the bot to post the sale events in. You'll also need the `local_image_path` containing tokens images.
+
+You can add a link to the tweet that's been generated in the discord message using `<tweetLink>` in your `saleMessageDiscord` template.
+
+To setup the bot, lead to https://discord.com/developers and create an application and a bot, then invite the bot you just created using the following link: https://discord.com/api/oauth2/authorize?client_id=[yourDiscordAppclientId]&permissions=2048&scope=bot%20applications.commands, then ensure that the invited bot is allowed to access the channel ID you want your bot to post into.
+
+## Statistics module
+
+You can enable the optional statistics module in the `AppModule` definition file `app.module.ts`. When
+enabled, it will index the blockchain for the specified contract in the configuration, starting at 
+block `statistic_initial_block`. Once indexed, the discord bot will reply to the following commands: 
+
+- `/owned <wallet>` will display a list of the owned tokens by a wallet.
+- `/wallet <wallet>` will display some statistics for a given wallet (owned token, days since the first owned tokens, total volume of transaction)
+- `/volume <window>` will display a volume of transactions per marketplace.
+- `/graph <wallet>` will display a graph showing the average price and the volume of transaction over time, the `wallet` parameter is optional and will filter out the data on the specified wallet.
+- `/traders <window> <wallet>` will display the top 20 traders for the tracked collection over the specified time window, the `wallet` parameter is optional and will force the given wallet to be displayed along it's rank if it has traded at least one NFT over the specified period.
+- `/index <block> <tx>` force indexation by the statistic module of the given transaction within the given block.
+- `/transaction <tx>` displays indexed informations about a given transaction, usefull for debugging purpose.
+
+The message templates for each command can be customized through the configuration file.
+
+## CLI mode
+
+You can use this app as a standalone cli using the following command line along with the `block` and `tx` parameter. The optional `contract` parameter can be used to override the contract from the configuration. ie:
+
+```
+npm run cli -- --action=tweet --contract=0xA6Cd272874Ee7C872Eb66801Eff62784C0b13285 --block=17886451 --tx=0x6018d9290709e7d34c820b23820aaacf960af9c4f073b661136d49fc0994d6c9
+```
+
+Will replay the given transaction and trigger the tweets detected within it. And:
+
+```
+npm run cli -- --action=index --contract=0xf07468eAd8cf26c752C676E43C814FEe9c8CF402 --block=14763639 --tx=0x1e0667e75e4aba0f5cb303d79969a7514ed1248b91889d2bb553863992ddff7e
+```
+
+Will index the given transaction into the statistics module.
 
 ## Running the app
 

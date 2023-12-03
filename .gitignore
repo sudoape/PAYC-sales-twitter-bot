@@ -1,4 +1,9 @@
+bids_images
+db.db
+token_images
+
 # compiled output
+coverage
 /dist
 /node_modules
 .env
@@ -34,3 +39,4 @@ lerna-debug.log*
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+auction_images
